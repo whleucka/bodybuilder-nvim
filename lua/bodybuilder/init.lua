@@ -23,21 +23,52 @@ local function clean_response(text, signature)
 
   local function normalize(s) return s:gsub("%s+", " "):gsub("^%s*", ""):gsub("%s*$", "") end
 
+  -- 2b. Strip PHP opening/closing tags if present on their own lines
+  if #lines > 0 and normalize(lines[1]) == "<?php" then
+    table.remove(lines, 1)
+  end
+  if #lines > 0 and normalize(lines[#lines]) == "?>" then
+    table.remove(lines, #lines)
+  end
+  -- Re-check empty lines after PHP tag removal
+  while #lines > 0 and lines[1]:match("^%s*$") do table.remove(lines, 1) end
+  while #lines > 0 and lines[#lines]:match("^%s*$") do table.remove(lines, #lines) end
+
   -- 3. Heuristic: Strip duplicated signature if present
+  -- Search first few lines (e.g. 5) for the signature
   if signature and #lines > 0 then
-    local first_line_norm = normalize(lines[1])
     local sig_norm = normalize(signature)
+    local found_idx = nil
     
-    -- Check for exact match or suffix match
-    if first_line_norm == sig_norm or first_line_norm:find(sig_norm, 1, true) then
-      table.remove(lines, 1)
-      -- If we removed the signature, check for trailing 'end'/'}' that might belong to it
-      -- But only if we suspect it was a wrapper. 
+    for i = 1, math.min(#lines, 5) do
+      local line_norm = normalize(lines[i])
+      if line_norm == sig_norm or line_norm:find(sig_norm, 1, true) then
+        found_idx = i
+        break
+      end
+    end
+    
+    if found_idx then
+      -- Remove everything up to and including the signature
+      for _ = 1, found_idx do
+        table.remove(lines, 1)
+      end
+      
+      -- If we stripped the signature, check if the last line is a closing brace/end for that wrapper
+      -- We'll assume the last line is the wrapper closer if it's just '}' or 'end'
+      if #lines > 0 then
+         local last_norm = normalize(lines[#lines])
+         if last_norm == "}" or last_norm == "end" then
+            table.remove(lines, #lines)
+         end
+      end
     end
   end
 
   -- 4. Strip surrounding braces { } if they appear to wrap the whole body
   -- (Common in C-style languages where model returns { ... })
+  -- NOTE: If step 3 ran, it might have already stripped the wrapper braces if the signature was present.
+  -- This step catches cases where the model returns "{ ... }" WITHOUT the signature.
   if #lines >= 2 then
     local first = normalize(lines[1])
     local last = normalize(lines[#lines])
