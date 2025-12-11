@@ -284,6 +284,13 @@ function M.fill_method_body()
               vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, lines)
           end
       end
+    end),
+    on_error = vim.schedule_wrap(function(response)
+      spin_handle.stop()
+      vim.notify("AI Request Failed (Curl Error): " .. (response.message or response.exit_code or "Unknown"), vim.log.levels.ERROR)
+      if vim.api.nvim_buf_is_valid(bufnr) then
+         vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, { target_indent .. "Connection Error 😢" })
+      end
     end)
   })
 
