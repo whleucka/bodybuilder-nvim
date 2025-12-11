@@ -21,30 +21,43 @@ local function clean_response(text, signature)
   while #lines > 0 and lines[1]:match("^%s*$") do table.remove(lines, 1) end
   while #lines > 0 and lines[#lines]:match("^%s*$") do table.remove(lines, #lines) end
 
+  local function normalize(s) return s:gsub("%s+", " "):gsub("^%s*", ""):gsub("%s*$", "") end
+
   -- 3. Heuristic: Strip duplicated signature if present
   if signature and #lines > 0 then
-    -- Normalize whitespace for comparison
-    local function normalize(s) return s:gsub("%s+", " "):gsub("^%s*", ""):gsub("%s*$", "") end
-    
     local first_line_norm = normalize(lines[1])
     local sig_norm = normalize(signature)
     
-    -- Check for exact match or suffix match (in case prompt included 'function' and result has 'local function')
+    -- Check for exact match or suffix match
     if first_line_norm == sig_norm or first_line_norm:find(sig_norm, 1, true) then
       table.remove(lines, 1)
-      
-      -- If we removed the signature, we should check for a trailing 'end'
-      if #lines > 0 and normalize(lines[#lines]) == "end" then
-        table.remove(lines, #lines)
-      end
+      -- If we removed the signature, check for trailing 'end'/'}' that might belong to it
+      -- But only if we suspect it was a wrapper. 
     end
   end
-  
-  -- 4. Strip just 'end' if it's the last line and looks like the closing of the function
-  -- (This is risky if the function ends with a loop/if end, but often models return the whole function)
-  -- A safer check: if line 1 was NOT the signature, but we still have a trailing 'end' 
-  -- AND the indentation matches the outer scope... tricky.
-  -- Let's stick to the signature check for now, as that's the most common failure mode for small models.
+
+  -- 4. Strip surrounding braces { } if they appear to wrap the whole body
+  -- (Common in C-style languages where model returns { ... })
+  if #lines >= 2 then
+    local first = normalize(lines[1])
+    local last = normalize(lines[#lines])
+    if first == "{" and last == "}" then
+      table.remove(lines, 1)
+      table.remove(lines, #lines)
+    end
+  elseif #lines == 1 then
+    -- Single line case: "{ return 1; }" -> "return 1;"
+    local l = lines[1]
+    local s, e = l:find("^{.*}$")
+    if s then
+       -- extraction logic is tricky for single line, let's keep it simple for now
+       -- assuming multi-line response for complex bodies
+    end
+  end
+
+  -- Re-strip empty lines after brace removal
+  while #lines > 0 and lines[1]:match("^%s*$") do table.remove(lines, 1) end
+  while #lines > 0 and lines[#lines]:match("^%s*$") do table.remove(lines, #lines) end
 
   return lines
 end
@@ -65,54 +78,66 @@ function M.fill_method_body()
     return
   end
 
-  local start_row, _, end_row, _ = node:range()
-  -- Assume body is between start_row and end_row.
-  -- We want to preserve the signature (start_row) and the closing token (end_row usually).
-  -- This is a heuristic. For robust body detection, we'd need per-language queries.
-  -- But replacing from start_row+1 to end_row-1 is a safe bet for "body content".
+  local f_start_row, _, _, _ = node:range()
+  local start_row, end_row
+  local body_node = ts.get_body_node(node)
   
-  -- Check if there is actually space
+  if body_node then
+    start_row, _, end_row, _ = body_node:range()
+  else
+    -- Fallback
+    start_row, _, end_row, _ = node:range()
+  end
+
+  -- Check if there is actually space (multi-line required)
   if end_row <= start_row then
-    -- One line function?
     vim.notify("Function seems too short to have a body.", vim.log.levels.WARN)
     return
   end
 
   -- Prepare context
-  local signature = vim.api.nvim_buf_get_lines(bufnr, start_row, start_row+1, false)[1]
+  -- Signature from function start
+  local signature = vim.api.nvim_buf_get_lines(bufnr, f_start_row, f_start_row+1, false)[1]
   local docs = ts.get_docstring(node)
   local file_context = ts.get_context(bufnr, node)
 
   local prompt = string.format(config.options.prompt_template, signature, docs, file_context)
 
-  -- UI: Clear body and show spinner
-  -- Delete existing body lines
-  vim.api.nvim_buf_set_lines(bufnr, start_row + 1, end_row, false, { "" }) 
-  -- Now we have a blank line at start_row + 1. 
-  -- Note: end_row was the index of the last line. 
-  -- set_lines(buffer, start, end, strict, replacement)
-  -- If we replace range (start_row+1, end_row) with {""}, we effectively clear it.
-  -- But we need to make sure we don't delete the `end` keyword line if `end_row` points to it.
-  -- Treesitter range is 0-indexed, [start_row, end_row). wait.
-  -- `node:range()` returns 0-indexed start_row, start_col, end_row, end_col.
-  -- In API, end_row is exclusive. 
-  -- So if a function is lines 10 to 12 (3 lines). Range might be 10, 0, 12, 3.
-  -- Lines are 10, 11, 12.
-  -- Body is line 11.
-  -- We want to replace line 11.
-  -- API: set_lines(buf, 10+1, 12, ...) -> replaces 11... wait.
-  -- 10 is signature. 12 is `end`.
-  -- We want to replace from 11 to 12 (exclusive). So just line 11.
-  -- Yes, start_row + 1, end_row.
+  -- Indentation helpers
+  local function get_indent(line_idx)
+    local line = vim.api.nvim_buf_get_lines(bufnr, line_idx, line_idx+1, false)[1] or ""
+    return line:match("^(%s*)") or ""
+  end
+  
+  -- Determine indentation from the closing line (usually correct indent for the block closing)
+  local base_indent_str = get_indent(end_row)
+  local shift_width = vim.bo[bufnr].shiftwidth
+  local expand_tab = vim.bo[bufnr].expandtab
+  local indent_char = expand_tab and string.rep(" ", shift_width) or "\t"
+  local target_indent = base_indent_str .. indent_char
 
-  local spinner_line = start_row + 1
-  -- Insert a placeholder line for the spinner to attach to (empty to minimize visual noise)
-  vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, { "" })
+  -- Range to replace: (start_row + 1) up to end_row
+  -- This preserves the line with '{' (start_row) and '}' (end_row)
+  local replace_start = start_row + 1
+  local replace_end = end_row
+  
+  -- UI: Clear body and show spinner
+  -- We clear the content between braces
+  vim.api.nvim_buf_set_lines(bufnr, replace_start, replace_end, false, { "" }) 
+  
+  local spinner_line = replace_start
+  -- Insert a placeholder line for the spinner to attach to
+  -- Note: set_lines with same start/end inserts.
+  -- But we just replaced the range with {""}. So line replace_start IS empty.
+  -- We don't need to insert another one.
+  -- Wait: set_lines(..., replace_start, replace_end, ..., {""})
+  -- If replace_start < replace_end (we had content), it is replaced by empty line.
+  -- If replace_start == replace_end (empty body), it inserts empty line.
+  -- In both cases, line replace_start exists and is empty.
   
   local spin_handle = spinner.start(bufnr, spinner_line)
 
   -- Async request
-  -- We use curl.post
   local url = config.options.url
   local payload = {
     model = config.options.model,
@@ -130,8 +155,7 @@ function M.fill_method_body()
       spin_handle.stop()      
       if response.status ~= 200 then
         vim.notify("AI Request Failed: " .. (response.body or "Unknown error"), vim.log.levels.ERROR)
-        -- Restore placeholder or leave it as error indication?
-        vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, { "Failed 😢" })
+        vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, { target_indent .. "Failed 😢" })
         return
       end
 
@@ -139,10 +163,8 @@ function M.fill_method_body()
       local result_text = ""
       
       if data.response then
-        -- Ollama /api/generate
         result_text = data.response
       elseif data.choices and data.choices[1] then
-        -- OpenAI style
         local choice = data.choices[1]
         if choice.message and choice.message.content then
           result_text = choice.message.content
@@ -153,13 +175,35 @@ function M.fill_method_body()
       
       local lines = clean_response(result_text, signature)
       
+      -- Dedent lines (remove common prefix whitespace from AI response)
+      local common_indent = nil
+      for _, line in ipairs(lines) do
+        if #line > 0 then
+          local indent = line:match("^(%s*)")
+          if common_indent == nil or #indent < #common_indent then
+            common_indent = indent
+          end
+        end
+      end
+      
+      if common_indent and #common_indent > 0 then
+        for i, line in ipairs(lines) do
+          lines[i] = line:sub(#common_indent + 1)
+        end
+      end
+
+      -- Re-indent with target_indent
+      for i, line in ipairs(lines) do
+        if #line > 0 then
+           lines[i] = target_indent .. line
+        end
+      end
+      
       -- Ensure buffer is still valid and we are within range
       if vim.api.nvim_buf_is_valid(bufnr) then
           local current_lines = vim.api.nvim_buf_line_count(bufnr)
           if spinner_line < current_lines then
               -- Replace the placeholder line with the generated lines
-              -- The placeholder is at spinner_line (single line).
-              -- We replace [spinner_line, spinner_line+1) with new lines.
               vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, lines)
           end
       end

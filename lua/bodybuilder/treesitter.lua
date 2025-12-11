@@ -24,6 +24,21 @@ function M.get_current_function_node()
   return nil
 end
 
+function M.get_body_node(node)
+  -- Try to find child by field name 'body'
+  local body = node:child_by_field_name("body")
+  if body then return body end
+  
+  -- Fallback: iterate children and look for block-like types
+  for child in node:iter_children() do
+    local type = child:type()
+    if type == "block" or type == "compound_statement" or type == "statement_block" then
+      return child
+    end
+  end
+  return nil
+end
+
 function M.get_function_text(node)
   return ts_utils.get_node_text(node)
 end
