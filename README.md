@@ -52,6 +52,7 @@ require("bodybuilder").setup({
   model = "llama3",
   prompt_template = "...", -- See config.lua for default
   keymap = nil, -- Set to string (e.g. '<leader>af') to auto-register
+  timeout = 10000, -- Timeout in milliseconds (default: 10000)
 })
 ```
 

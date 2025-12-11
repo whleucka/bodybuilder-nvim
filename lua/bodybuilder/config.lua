@@ -23,7 +23,8 @@ File context:
 %s
 ]],
   stream = false, -- Ollama supports streaming
-  keymap = nil -- Example: '<leader>af'
+  keymap = nil, -- Example: '<leader>af'
+  timeout = 10000 -- Timeout in milliseconds
 }
 
 M.options = {}

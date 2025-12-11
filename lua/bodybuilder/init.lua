@@ -125,6 +125,7 @@ function M.fill_method_body()
     headers = {
       ["Content-Type"] = "application/json",
     },
+    timeout = config.options.timeout,
     callback = vim.schedule_wrap(function(response)
       spin_handle.stop()      
       if response.status ~= 200 then
