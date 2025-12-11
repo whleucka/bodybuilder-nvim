@@ -11,6 +11,7 @@ local function is_function_node(node)
       or type:match('function_declaration')
       or type:match('method_declaration')
       or type == 'function_item' -- Rust
+      or type == 'arrow_function' -- JS/TS
 end
 
 function M.get_current_function_node()
