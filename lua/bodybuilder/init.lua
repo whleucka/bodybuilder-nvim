@@ -4,18 +4,49 @@ local ts = require('bodybuilder.treesitter')
 local spinner = require('bodybuilder.spinner')
 local curl = require('plenary.curl')
 
--- Helper to strip markdown code blocks
-local function clean_response(text)
-  -- Try to find markdown code block
+-- Helper to strip markdown code blocks and repeated signatures
+local function clean_response(text, signature)
+  -- 1. Try to find markdown code block
   local code_content = text:match("```%w*\n(.-)\n```")
   if code_content then
     text = code_content
   else
-    -- Fallback: strip leading/trailing backticks if they exist without newline structure
+    -- Fallback: strip leading/trailing backticks
     text = text:gsub("^%s*```%w*%s*", ""):gsub("%s*```%s*$", "")
   end
-  -- Split into lines
-  return vim.split(text, "\n")
+
+  local lines = vim.split(text, "\n")
+  
+  -- 2. Strip empty lines at start/end
+  while #lines > 0 and lines[1]:match("^%s*$") do table.remove(lines, 1) end
+  while #lines > 0 and lines[#lines]:match("^%s*$") do table.remove(lines, #lines) end
+
+  -- 3. Heuristic: Strip duplicated signature if present
+  if signature and #lines > 0 then
+    -- Normalize whitespace for comparison
+    local function normalize(s) return s:gsub("%s+", " "):gsub("^%s*", ""):gsub("%s*$", "") end
+    
+    local first_line_norm = normalize(lines[1])
+    local sig_norm = normalize(signature)
+    
+    -- Check for exact match or suffix match (in case prompt included 'function' and result has 'local function')
+    if first_line_norm == sig_norm or first_line_norm:find(sig_norm, 1, true) then
+      table.remove(lines, 1)
+      
+      -- If we removed the signature, we should check for a trailing 'end'
+      if #lines > 0 and normalize(lines[#lines]) == "end" then
+        table.remove(lines, #lines)
+      end
+    end
+  end
+  
+  -- 4. Strip just 'end' if it's the last line and looks like the closing of the function
+  -- (This is risky if the function ends with a loop/if end, but often models return the whole function)
+  -- A safer check: if line 1 was NOT the signature, but we still have a trailing 'end' 
+  -- AND the indentation matches the outer scope... tricky.
+  -- Let's stick to the signature check for now, as that's the most common failure mode for small models.
+
+  return lines
 end
 
 function M.setup(options)
@@ -75,8 +106,8 @@ function M.fill_method_body()
   -- Yes, start_row + 1, end_row.
 
   local spinner_line = start_row + 1
-  -- Insert a placeholder comment for the spinner to attach to
-  vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, { "-- generating..." })
+  -- Insert a placeholder line for the spinner to attach to (empty to minimize visual noise)
+  vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, { "" })
   
   local spin_handle = spinner.start(bufnr, spinner_line)
 
@@ -99,7 +130,7 @@ function M.fill_method_body()
       if response.status ~= 200 then
         vim.notify("AI Request Failed: " .. (response.body or "Unknown error"), vim.log.levels.ERROR)
         -- Restore placeholder or leave it as error indication?
-        vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, { "-- Generation failed." })
+        vim.api.nvim_buf_set_lines(bufnr, spinner_line, spinner_line+1, false, { "Failed 😢" })
         return
       end
 
@@ -119,7 +150,7 @@ function M.fill_method_body()
         end
       end
       
-      local lines = clean_response(result_text)
+      local lines = clean_response(result_text, signature)
       
       -- Replace the placeholder line with the generated lines
       -- The placeholder is at spinner_line (single line).
