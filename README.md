@@ -1,9 +1,9 @@
 <img width="100%" alt="image" src="https://github.com/user-attachments/assets/ee51c1f6-9445-4ccc-a4a5-9d86c4bee4a7" />
 
 
-**NOTE** this is a work in progress, so use it at your own risk.
+**WARNING** this is a work in progress, so use it at your own risk.
 
-Pump up your code! Automatically fill in the body of your methods/functions with AI, keeping your signatures and docs intact. Designed for Neovim, fully async.
+Pump up your code! Automatically generate the body of your functions or methods using AI, keeping your signatures and docstrings intact. Built for Neovim and fully async, so your workflow never skips a beat.
 
 ## Features
 
