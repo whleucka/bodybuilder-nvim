@@ -31,7 +31,7 @@ vim.pack.add({
 })
 
 require("bodybuilder").setup({
-  model = "gemma3:270m",  -- Matches the NAME from your ollama list
+  model = "gemma3:270m",  -- Matches the name from your ollama list (also works with ollama cloud)
   keymap = "<leader>ab",
 })
 ```
@@ -50,7 +50,7 @@ Default options:
 ```lua
 require("bodybuilder").setup({
   url = "http://localhost:11434/api/generate", -- Endpoint (Ollama default)
-  model = "llama3",
+  model = "llama3", -- See https://github.com/ollama/ollama?tab=readme-ov-file#model-library
   prompt_template = "...", -- See config.lua for default
   keymap = nil, -- Set to string (e.g. '<leader>ab') to auto-register
   timeout = 10000, -- Timeout in milliseconds (default: 10000)
