@@ -1,6 +1,6 @@
 # 💪 bodybuilder.nvim
 
-**WARNING** this is a work in progress, so use it at your own risk.
+**WARNING** this is a work in progress. Possibly cursed. Experimental.
 
 Pump up your code! Automatically generate the body of your functions or methods using AI, keeping your signatures and docstrings intact. Built for Neovim and fully async, so your workflow never skips a beat.
 
