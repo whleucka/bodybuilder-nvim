@@ -4,7 +4,7 @@
 
 Pump up your code! Automatically generate the body of your functions or methods using AI, keeping your signatures and docstrings intact. Built for Neovim and fully async, so your workflow never skips a beat.
 
-https://github.com/user-attachments/assets/fd5c5d4b-fbb4-493a-9122-479bb3f2c758
+https://github.com/user-attachments/assets/b3f39e46-fb49-47b1-b9cc-a13e86fae759
 
 ---
 
